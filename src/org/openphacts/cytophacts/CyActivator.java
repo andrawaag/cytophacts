@@ -7,7 +7,9 @@ import javax.swing.AbstractAction;
 import javax.swing.JOptionPane;
 
 import org.cytoscape.app.swing.CySwingAppAdapter;
+import org.cytoscape.model.CyNetwork;
 import org.cytoscape.service.util.AbstractCyActivator;
+import org.cytoscape.view.model.CyNetworkViewFactory;
 import org.cytoscape.work.ServiceProperties;
 import org.cytoscape.work.TaskFactory;
 import org.osgi.framework.BundleContext;
@@ -16,17 +18,30 @@ public class CyActivator extends AbstractCyActivator
 {
 	private BundleContext context;
 	private CySwingAppAdapter adapter;
+	private CyNetwork myNet;
 	
 	@Override
 	public void start(BundleContext context) throws Exception 
 	{
 		System.out.println ("Initializing Cytophacts plugin");
 		this.context = context;		
-		
 		adapter = getService(context, CySwingAppAdapter.class);
+		// Create an empty network
+		myNet = adapter.getCyNetworkFactory().createNetwork();
+		myNet.getRow(myNet).set(CyNetwork.NAME, "OpenPhacts");
+		
+		//CyNetworkViewFactory networkViewFactory = getService(null, CyNetworkViewFactory.class);
+		
 
-		registerMenu(context, "Apps.OpenPhacts", new CreateNetworkTask(adapter));
-		registerMenu(context, "Apps.OpenPhacts", new OpenPhactsAction());
+	//	registerMenu(context, "Apps.OpenPhacts.Hierarchies", new CreateHierarchyNetworkCalls(adapter));
+		registerMenu(context, "Apps.OpenPhacts.Hierarchies.Root Nodes.Gene Ontology", new CreateHierarchyNetworkCalls(adapter, "go", myNet));
+		registerMenu(context, "Apps.OpenPhacts.Hierarchies.Root Nodes.Enzyme", new CreateHierarchyNetworkCalls(adapter, "enzyme", myNet));
+		registerMenu(context, "Apps.OpenPhacts.Hierarchies.Root Nodes.ChEMBL", new CreateHierarchyNetworkCalls(adapter,"chembl", myNet));
+		registerMenu(context, "Apps.OpenPhacts.Hierarchies.Root Nodes.ChEBI", new CreateHierarchyNetworkCalls(adapter, "chebi", myNet));
+		registerMenu(context, "Apps.OpenPhacts.Hierarchies.Get child nodes", new GetChildNodes(adapter, myNet));
+	//	registerMenu(context, "Apps.OpenPhacts.Compounds", new CreateHierarchyNetworkCalls(adapter));
+	//	registerMenu(context, "Apps.OpenPhacts.Targets", new CreateHierarchyNetworkCalls(adapter));
+	//	registerMenu(context, "Apps.OpenPhacts.Pathways", new CreateHierarchyNetworkCalls(adapter));
 	}
 
 	private class OpenPhactsAction extends AbstractAction

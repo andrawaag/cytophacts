@@ -14,6 +14,9 @@ import org.cytoscape.model.CyNetwork;
 import org.cytoscape.model.CyNode;
 import org.cytoscape.model.CyTable;
 
+/**
+ * Task to fetch network data from the OpenPhacts API.
+ */
 public class CreateNetworkTask extends AbstractAction 
 {
 	private CyAppAdapter adapter;
@@ -27,6 +30,7 @@ public class CreateNetworkTask extends AbstractAction
 	private CyNetwork myNet;
 	private Map<String, CyNode> idMap = new HashMap<String, CyNode>();
 	
+	/** returns the node for a given key, or creates a new one if it doesn't exist. */
 	public CyNode createOrGet (String key)
 	{
 		if (idMap.containsKey(key))
@@ -41,6 +45,7 @@ public class CreateNetworkTask extends AbstractAction
 		}
 	}
 	
+	/** actually create the network */
 	@Override
 	public void actionPerformed(ActionEvent e) 
 	{
@@ -52,53 +57,69 @@ public class CreateNetworkTask extends AbstractAction
 			myNet = adapter.getCyNetworkFactory().createNetwork();
 			myNet.getRow(myNet).set(CyNetwork.NAME, "OpenPhacts");
 			
-			String SMILES = "CC(=O)Oc1ccccc1C(=O)O";
-			List<String> compounds = om.getSubStructureSearch(SMILES);
-	
-			// Add two nodes to the network
+			// Some hard-coded search values. TODO: use an input dialog. 
+			String valylglucose = "CC(C)C(C(=O)O[C@@H](C=O)[C@H]([C@@H]([C@@H](CO)O)O)O)N";
+			String aspirin = "CC(=O)Oc1ccccc1C(=O)O";
+			String ethylPyruvate = "CCOC(=O)C(=O)C";
+			String pyruvate = "O=C(C(=O)O)C";
+			List<String> compounds = om.getSubStructureSearch(pyruvate);
 			
-			String mainName = "Aspirin";
+			// TODO: look up the name of the compound instead of hard-coding
+			String mainName = "Pyruvate";
 			CyNode nodeMainCompound = createOrGet(mainName);
 			
 			CyTable table = myNet.getDefaultNodeTable();
+			table.createColumn("uuid", String.class, true);
 			
 			// set name attribute for new nodes
 			table.getRow(nodeMainCompound.getSUID()).set("name", mainName);
 	
+			int count = 0;
 			for (String comp : compounds)
 			{
 				System.out.println ("Compound: " + comp);
+				if (count++ >= 5) break; //Don't look further than top XXX.
 				
-				// Add two nodes to the network
+				// Add node to the network for a compound
 				CyNode nodeComp = createOrGet(comp);
+				
 				// set name attribute for new nodes
 				myNet.getDefaultNodeTable().getRow(nodeComp.getSUID()).set("name", comp);
 				
-				// first get a list of compounds
-				List<String> pwys = om.getPathwaysForCompound(comp, "Homo sapiens");
+				List<String> uuids = om.getConceptWikiUUID(comp);
 	
-				// Add an edge
+				// Add an edge between compound and center
 				myNet.addEdge(nodeMainCompound, nodeComp, true);
 	
-				for (String pwy : pwys)
+				if (uuids.size() > 0)
 				{
-					// Add two nodes to the network
-					CyNode nodePwy = createOrGet(pwy);
+					String uuid = uuids.get(0);
+					System.out.println ("UUID: " + uuid);
 					
-					// set name attribute for new nodes
-					myNet.getDefaultNodeTable().getRow(nodePwy.getSUID()).set("name", pwy);
+					myNet.getDefaultNodeTable().getRow(nodeComp.getSUID()).set("uuid", uuid);
 					
-					// Add an edge
-					myNet.addEdge(nodeComp, nodePwy, true);
-				}
-			
+					// first get a list of compounds
+					List<String> pwys = om.getPathwaysForCompound(uuid, "Homo sapiens");
+		
+					for (String pwy : pwys)
+					{
+						// Add node to the network for pathway
+						CyNode nodePwy = createOrGet(pwy);
+						
+						// set name attribute for new nodes
+						myNet.getDefaultNodeTable().getRow(nodePwy.getSUID()).set("name", pwy);
+						
+						// Add an edge between compound and pathway
+						myNet.addEdge(nodeComp, nodePwy, true);
+					}
+				}			
 			}
 					
 			adapter.getCyNetworkManager().addNetwork(myNet);
 		}
 		catch (Exception ex)
 		{
-			JOptionPane.showMessageDialog(null, "Exception: " + ex.getClass().getName() + " " + ex.getMessage());
+			JOptionPane.showMessageDialog(null, "<html>Exception: " + ex.getClass().getName() + "</br>" + ex.getMessage());
 			ex.printStackTrace();
 		}
 	}

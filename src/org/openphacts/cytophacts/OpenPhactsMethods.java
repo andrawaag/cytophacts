@@ -11,18 +11,27 @@ import java.net.URL;
 import java.net.URLConnection;
 import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import javax.swing.JOptionPane;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 
 import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
 
 
 import org.codehaus.jackson.map.ObjectMapper;
+import org.cytoscape.model.CyNetwork;
+import org.cytoscape.model.CyNode;
+import org.cytoscape.model.CyTable;
+import org.cytoscape.model.CyTableUtil;
 
 public class OpenPhactsMethods 
 {
@@ -31,50 +40,169 @@ public class OpenPhactsMethods
 	 * @throws IOException 
 	 */
 
+	static String app_key = "c5eaa930c723fcfda47c1b0e0f201b4f";
+	static String app_id = "b9d2be99";
 	OpenPhactsMethods()
 	{
 	}
-	
-	
-	public static void main(String[] args) throws IOException 
+
+
+	public static void main(String[] args) throws IOException, ParserConfigurationException, SAXException 
 	{
 		new OpenPhactsMethods().run();
 	}
-	
+
 	/**
 	 * Get the SMILES string for a compound by name
 	 * @param chemicalName
 	 * @return SMILES string.
 	 * @throws IOException 
 	 */
-	
+
 	public List<String> getChemicalFromText(String compoundName) throws IOException{
-		URL url = new URL("https://beta.openphacts.org/1.3/search/byTag?app_id=b9d2be99&app_key=c5eaa930c723fcfda47c1b0e0f201b4f&q=lactate&uuid=07a84994-e464-4bbf-812a-a4b96fa3d197&_format=tsv");
+		URL url = new URL("https://beta.openphacts.org/1.3/search/byTag?app_id="+app_id+"&app-key="+app_key+"&q=lactate&uuid=07a84994-e464-4bbf-812a-a4b96fa3d197&_format=tsv");
 		return getOpenPhacts(url);
 	}
-	
-	public String[] getConceptWikiUUID(String uri) throws IOException, ParserConfigurationException, SAXException{
-		String[] result;
-		URL url = new URL("http://openphacts.cs.man.ac.uk:9092/QueryExpander/mapUri?Uri="+URLEncoder.encode(uri, "UTF-8")+"&format=application/xml&targetUriPattern=http://www.conceptwiki.org/concept/$id");
+
+	public static CyNode createOrGet (String key, Map<String, CyNode> idMap, CyNetwork cytoNetwork)
+	{
+		if (idMap.containsKey(key))
+		{
+			return idMap.get(key);
+		}
+		else
+		{
+			CyNode node = cytoNetwork.addNode();
+			idMap.put (key, node);
+			return node;
+		}
+	}
+
+	public static Document getOpenPHACTSAsDOM(String url) throws ParserConfigurationException, MalformedURLException, SAXException, IOException{
 		DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
-        DocumentBuilder db = dbf.newDocumentBuilder();
-        Document results = db.parse(url.openStream());
-		results.getElementsByTagName("targetUri");
-		result.a
-		return getOpenPhacts(url);
+		DocumentBuilder db = dbf.newDocumentBuilder();
+		return db.parse(new URL(url+"&_format=xml").openStream());
 	}
-	
-	
+
+	public static void getHierarchyRoots(String hierarchy, Map<String, CyNode> idMap, CyNetwork cytoNetwork, CyTable table) throws ParserConfigurationException, SAXException, IOException{
+		String url = "https://beta.openphacts.org/1.3/tree?app_id="+app_id+"&app_key="+app_key+"&root="+hierarchy;
+		Document opsResults = getOpenPHACTSAsDOM(url);
+		NodeList termsResults = opsResults.getElementsByTagName("item");
+		CyNode hierarchyNode = createOrGet(hierarchy, idMap, cytoNetwork);
+		table.getRow(hierarchyNode.getSUID()).set("name", hierarchy);
+
+		for (int i = 0; i < termsResults.getLength(); i++) {
+			Element resultElement = (Element) termsResults.item(i);		
+			//JOptionPane.showMessageDialog(null, resultElement.getAttribute("href"));
+			CyNode rootNode = createOrGet(resultElement.getAttribute("href"), idMap, cytoNetwork);
+			cytoNetwork.addEdge(hierarchyNode, rootNode, true);
+			table.getRow(rootNode.getSUID()).set("uri", resultElement.getAttribute("href"));
+			if (resultElement.getElementsByTagName("prefLabel").getLength()>0) { 
+				String nodeName = resultElement.getElementsByTagName("prefLabel").item(0).getTextContent();
+				table.getRow(rootNode.getSUID()).set("name", nodeName);
+			}
+		}	
+	}
+
+	public static void getChildNodes(Map<String, CyNode> idMap, CyNetwork cytoNetwork, CyTable table) throws ParserConfigurationException, SAXException, IOException{
+		List<CyNode> selectedNodes = CyTableUtil.getNodesInState(cytoNetwork,"selected",true);
+		JOptionPane.showMessageDialog(null,selectedNodes.size());
+		if (selectedNodes.size()==0) {
+			JOptionPane.showMessageDialog(null,"No nodes selected...");
+		} else {
+			for (int a = 0; a < selectedNodes.size(); a++){
+				CyNode tempNode = selectedNodes.get(a);
+				String tempUri = table.getRow(tempNode.getSUID()).get("uri", String.class);
+				if (tempUri != ""){
+					String url = "https://beta.openphacts.org/1.3/tree?app_id="+app_id+"&app_key="+app_key+"&"+URLEncoder.encode(tempUri, "UTF-8");
+					Document opsResults = getOpenPHACTSAsDOM(url);
+					NodeList termsResults = opsResults.getElementsByTagName("item");
+					for (int i = 0; i < termsResults.getLength(); i++) {
+						Element resultElement = (Element) termsResults.item(i);		
+						//JOptionPane.showMessageDialog(null, resultElement.getAttribute("href"));
+						CyNode rootNode = createOrGet(resultElement.getAttribute("href"), idMap, cytoNetwork);
+						cytoNetwork.addEdge(tempNode, rootNode, true);
+						table.getRow(rootNode.getSUID()).set("uri", resultElement.getAttribute("href"));
+						if (resultElement.getElementsByTagName("prefLabel").getLength()>0) { 
+							String nodeName = resultElement.getElementsByTagName("prefLabel").item(0).getTextContent();
+							table.getRow(rootNode.getSUID()).set("name", nodeName);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	public static void getParentNodes(String hierarchy, Map<String, CyNode> idMap, CyNetwork cytoNetwork, CyTable table) throws ParserConfigurationException, SAXException, IOException{
+		String url = "https://beta.openphacts.org/1.3/tree?app_id="+app_id+"&app_key="+app_key;
+		Document opsResults = getOpenPHACTSAsDOM(url);
+		NodeList termsResults = opsResults.getElementsByTagName("item");
+		CyNode hierarchyNode = createOrGet(hierarchy, idMap, cytoNetwork);
+		table.getRow(hierarchyNode.getSUID()).set("name", hierarchy);
+
+		for (int i = 0; i < termsResults.getLength(); i++) {
+			Element resultElement = (Element) termsResults.item(i);		
+			//JOptionPane.showMessageDialog(null, resultElement.getAttribute("href"));
+			CyNode rootNode = createOrGet(resultElement.getAttribute("href"), idMap, cytoNetwork);
+			cytoNetwork.addEdge(hierarchyNode, rootNode, true);
+			table.getRow(rootNode.getSUID()).set("uri", resultElement.getAttribute("href"));
+			if (resultElement.getElementsByTagName("prefLabel").getLength()>0) { 
+				String nodeName = resultElement.getElementsByTagName("prefLabel").item(0).getTextContent();
+				table.getRow(rootNode.getSUID()).set("name", nodeName);
+			}
+		}	
+	}
+
+	public List<String> getConceptWikiUUID(String uri) throws IOException, ParserConfigurationException, SAXException
+	{
+		List<String> result = new ArrayList<String>();
+		try
+		{
+			URL url = new URL("http://openphacts.cs.man.ac.uk:9092/QueryExpander/mapUri?Uri="+URLEncoder.encode(uri, "UTF-8")+"&format=application/xml&targetUriPattern=http://www.conceptwiki.org/concept/$id");
+			DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+			DocumentBuilder db = dbf.newDocumentBuilder();
+			Document results = db.parse(url.openStream());
+			NodeList nl = results.getElementsByTagName("targetUri");
+			for (int i = 0; i < nl.getLength(); ++i)
+			{
+				Node n = nl.item(i);
+				String id = n.getTextContent();
+				result.add (id);
+			}
+			return result;
+		}
+		catch (Exception e)
+		{
+			//TODO: better error handling.
+			e.printStackTrace();
+			return Collections.emptyList();
+		}
+	}
+
+
 	public String getSMILES (String chemicalUrl) throws IOException
 	{
 		URL url = new URL("https://beta.openphacts.org/1.3/compound?uri="+URLEncoder.encode(chemicalUrl, "UTF-8")+"&app_id=b9d2be99&app_key=c5eaa930c723fcfda47c1b0e0f201b4f&_format=tsv");
 		return getOpenPhacts(url).get(1).split("\t")[20];
 	}
-	
+
+	private static class StructureSearchResult implements Comparable<StructureSearchResult>
+	{
+		String id;
+		Number relevance;
+
+		@Override
+		public int compareTo(StructureSearchResult o) 
+		{
+			return Double.compare(o.relevance.doubleValue(), relevance.doubleValue()); 
+		}
+
+	}
+
 	/**
 	 * Use substructure search to get a list of similar compounds.
 	 * @param SMILES, for example "CC(=O)Oc1ccccc1C(=O)O"
-	 * @return list of compounds IDS
+	 * @return list of compounds IDS, sorted by relevance, most relevant first
 	 * @throws IOException 
 	 */
 	public List<String> getSubStructureSearch(String SMILES) throws IOException
@@ -83,17 +211,30 @@ public class OpenPhactsMethods
 		ObjectMapper mapper = new ObjectMapper(); // can reuse, share globally
 		InputStream is = url.openStream();
 		Map<String, ?> result = mapper.readValue(is, Map.class);
-		
-		List<?> searchResults = (List<?>)((Map<?, ?>)((Map<?, ?>)result.get("result")).get("primaryTopic")).get("result");
-		
-		List<String> ids = new ArrayList<String>();
-		for (Object o : searchResults)
+
+		List<Map<String, ?>> searchResults = (List<Map<String, ?>>)((Map<?, ?>)((Map<?, ?>)result.get("result")).get("primaryTopic")).get("result");
+
+		List<StructureSearchResult> searchResult = new ArrayList<StructureSearchResult>();
+		for (Map<String, ?> o : searchResults)
 		{
-			ids.add ((String)((Map <?, ?>)o).get("_about"));
+			StructureSearchResult ssr = new StructureSearchResult();
+			ssr.id = (String)o.get("_about");
+			ssr.relevance = (Number)o.get("relevance");
+			searchResult.add (ssr);
 		}
+		// Sort by relevance
+		Collections.sort (searchResult);
+
+		List<String> ids = new ArrayList<String>();
+		for (StructureSearchResult ssr : searchResult)
+		{
+			System.out.println (ssr.id + " " + ssr.relevance);
+			ids.add (ssr.id);
+		}
+
 		return ids;
 	}
-	
+
 	/**
 	 * Get a list of pathways for a given organism
 	 * @param organismName
@@ -102,12 +243,12 @@ public class OpenPhactsMethods
 	 */
 	public List<String> getOpenPhacts(URL url) throws IOException{
 		List<String> result = new ArrayList<String>();
-		
+
 		InputStream is;
 		try
 		{
-		URLConnection con = url.openConnection();
-		is = con.getInputStream();
+			URLConnection con = url.openConnection();
+			is = con.getInputStream();
 		}
 		catch (FileNotFoundException ex)
 		{
@@ -115,7 +256,7 @@ public class OpenPhactsMethods
 			// OpenPhacts API does not distinguish between this and other error conditions.
 			return result;
 		}
-		
+
 		InputStreamReader inStream = new InputStreamReader(is); 
 		BufferedReader buff= new BufferedReader(inStream);
 		String nextLine;
@@ -129,10 +270,10 @@ public class OpenPhactsMethods
 				break;
 			} 
 		}
-		
+
 		return result;
 	}
-	
+
 	public List<String> getPathways(String organismName) throws IOException
 	{
 		URL url = new URL("http://ops2.few.vu.nl/pathways?app_id=b9d2be99&app_key=c5eaa930c723fcfda47c1b0e0f201b4f&pathway_organism="+URLEncoder.encode(organismName, "UTF-8")+"&_format=tsv");
@@ -152,40 +293,9 @@ public class OpenPhactsMethods
 		return getOpenPhacts(url);
 	}
 
-	public void run() throws IOException
-	{
-		/*URL url = new URL("http://ops2.few.vu.nl/pathways?app_id=b9d2be99&app_key=c5eaa930c723fcfda47c1b0e0f201b4f&pathway_organism=Homo+sapiens&_format=tsv");
-		InputStream is = url.openStream();
-		InputStreamReader inStream = new InputStreamReader(is); 
-		BufferedReader buff= new BufferedReader(inStream);
-		String nextLine;
-		// Read and print the lines from index.html
-		while (true){
-			nextLine =buff.readLine();  
-			if (nextLine !=null){
-				System.out.println(nextLine); 
-			}
-			else{
-				break;
-			} 
-		}*/
-//		List<String> pathwayList = getPathways("Homo sapiens");
-//		for (String pwy : pathwayList)
-//		{
-//			System.out.println(pwy);
-//		}
-//		List<String> substructureList = getSubStructureSearch("CC(=O)Oc1ccccc1C(=O)O");
-//		for (String ssl : substructureList)
-//		{
-//			System.out.println(ssl);
-//		}
-		
-		List<String> pwyByCompound = getPathwaysForCompound("http://ops.rsc.org/OPS1536399", "Homo sapiens");
-		for (String x : pwyByCompound)
-		{
-			System.out.println(x); 
-		}
-		List<String> mapIds = mapURI("http://ops.rsc.org/OPS1536399");
+	public void run() throws IOException, ParserConfigurationException, SAXException
+	{	
+		List<String> mapIds = getConceptWikiUUID("http://ops.rsc.org/OPS1536399");
 		for (String x : mapIds)
 		{
 			System.out.println(x); 
